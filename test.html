@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Library Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    .test-status {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    #map-test {
+      width: 400px;
+      height: 300px;
+      border: 1px solid #ccc;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Library Test</h1>
+  
+  <div id="d3-test" class="test-status">Testing D3.js...</div>
+  <div id="topojson-test" class="test-status">Testing TopoJSON...</div>
+  <div id="data-test" class="test-status">Testing data loading...</div>
+  
+  <div id="map-test"></div>
+  
+  <script src="lib/d3.v7.min.js"></script>
+  <script src="lib/d3-geo.v2.min.js"></script>
+  <script src="lib/topojson.v3.min.js"></script>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Test D3.js
+      const d3Test = document.getElementById('d3-test');
+      if (typeof d3 !== 'undefined') {
+        d3Test.textContent = `D3.js loaded successfully: version ${d3.version}`;
+        d3Test.className = 'test-status success';
+      } else {
+        d3Test.textContent = 'Failed to load D3.js';
+        d3Test.className = 'test-status error';
+      }
+      
+      // Test TopoJSON
+      const topoTest = document.getElementById('topojson-test');
+      if (typeof topojson !== 'undefined') {
+        topoTest.textContent = 'TopoJSON loaded successfully';
+        topoTest.className = 'test-status success';
+      } else {
+        topoTest.textContent = 'Failed to load TopoJSON';
+        topoTest.className = 'test-status error';
+      }
+      
+      // Test data loading
+      const dataTest = document.getElementById('data-test');
+      dataTest.textContent = 'Testing data loading...';
+      
+      d3.json('lib/countries-110m.json')
+        .then(data => {
+          if (data && data.objects && data.objects.countries) {
+            dataTest.textContent = 'Map data loaded successfully';
+            dataTest.className = 'test-status success';
+            
+            // Draw a simple map
+            drawTestMap(data);
+          } else {
+            dataTest.textContent = 'Map data has unexpected structure';
+            dataTest.className = 'test-status error';
+          }
+        })
+        .catch(error => {
+          dataTest.textContent = `Failed to load map data: ${error.message}`;
+          dataTest.className = 'test-status error';
+        });
+    });
+    
+    function drawTestMap(data) {
+      const width = document.getElementById('map-test').clientWidth;
+      const height = document.getElementById('map-test').clientHeight;
+      
+      // Create SVG
+      const svg = d3.select('#map-test')
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height);
+      
+      // Define projection
+      const projection = d3.geoMercator()
+        .scale((width - 3) / (2 * Math.PI))
+        .translate([width / 2, height / 2]);
+      
+      // Define path generator
+      const path = d3.geoPath()
+        .projection(projection);
+      
+      // Convert TopoJSON to GeoJSON
+      const countries = topojson.feature(data, data.objects.countries);
+      
+      // Draw countries
+      svg.selectAll('path')
+        .data(countries.features)
+        .enter()
+        .append('path')
+        .attr('d', path)
+        .attr('fill', '#ccc')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 0.5);
+    }
+  </script>
+</body>
+</html> 
