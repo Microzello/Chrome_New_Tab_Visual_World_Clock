@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "World Clock New Tab",
+  "name": "Visual World Clock New Tab",
   "version": "2.0",
-  "description": "Replace new tab page with a beautiful world clock showing multiple time zones",
+  "description": "A modern world clock displaying time zones on a visual map with day/night curves",
   "permissions": ["geolocation"],
   "chrome_url_overrides": {
     "newtab": "index.html"
