@@ -1,6 +1,7 @@
 const SPECIAL = { ł: "l", ø: "o", æ: "ae", œ: "oe", ß: "ss", đ: "d", ð: "d", þ: "th", ı: "i", ħ: "h" };
 const SPECIAL_RE = /[łøæœßđðþıħ]/g;
-const MAJOR = 2500;
+const MATCH = { exact: 0, altExact: 0.3, prefix: 1.5, word: 2.5, altPrefix: 3 };
+const ALT_PREFIX_MIN = 4;
 
 const PUNCTUATION_RE = /[.'’`]/g;
 
@@ -144,38 +145,39 @@ function regionMatcher(db, query) {
 
 function scan(db, name, region, limit) {
   if (!name) return [];
-  const buckets = [[], [], [], []];
   const matchesRegion = region ? regionMatcher(db, region) : null;
   const wordStart = ` ${name}`;
   const dashStart = `-${name}`;
-  const rankKey = (key, i) => {
-    if (key === name) return 0;
-    if (key.startsWith(name)) return 1;
-    if (key.includes(wordStart) || key.includes(dashStart)) return i < MAJOR ? 1 : 3;
-    return -1;
+  const matchCost = (key) => {
+    if (key === name) return MATCH.exact;
+    if (key.startsWith(name)) return MATCH.prefix;
+    if (key.includes(wordStart) || key.includes(dashStart)) return MATCH.word;
+    return Infinity;
   };
+  const altPrefix = name.length >= ALT_PREFIX_MIN;
+  const best = [];
   for (let i = 0; i < db.count; i++) {
-    let rank = rankKey(db.keys[i], i);
-    const ascii = db.asciiKeys[i];
-    if (ascii && rank !== 0) {
-      const r = rankKey(ascii, i);
-      if (r >= 0 && (rank < 0 || r < rank)) rank = r;
-    }
+    const popularity = Math.log10(i + 1);
+    if (best.length >= limit && popularity >= best[best.length - 1].score) break;
+    let cost = matchCost(db.keys[i]);
+    if (cost && db.asciiKeys[i]) cost = Math.min(cost, matchCost(db.asciiKeys[i]));
     const alts = db.alts[i];
-    if (alts && rank !== 0) {
+    if (cost && alts) {
       for (const alt of alts) {
-        if (alt === name) {
-          rank = 0;
-          break;
-        }
-        if (rank < 0 && alt.startsWith(name)) rank = 2;
+        if (alt === name) cost = Math.min(cost, MATCH.altExact);
+        else if (altPrefix && alt.startsWith(name)) cost = Math.min(cost, MATCH.altPrefix);
       }
     }
-    if (rank < 0 || buckets[rank].length >= limit) continue;
+    if (cost === Infinity) continue;
+    const score = cost + popularity;
+    if (best.length >= limit && score >= best[best.length - 1].score) continue;
     if (matchesRegion && !matchesRegion(i)) continue;
-    buckets[rank].push(i);
+    let at = best.length;
+    while (at > 0 && best[at - 1].score > score) at--;
+    best.splice(at, 0, { i, score });
+    if (best.length > limit) best.pop();
   }
-  return buckets.flat();
+  return best.map((b) => b.i);
 }
 
 export function searchPlaces(db, query, limit = 8) {
