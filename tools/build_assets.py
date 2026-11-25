@@ -31,11 +31,9 @@ def resize(src, size, mode):
 
 def build_image(job):
     src, name, mode, quality = job
-    out = ROOT / "img"
-    for tag, size in (("4k", (4096, 2048)), ("8k", (8192, 4096))):
-        path = out / f"{name}_{tag}.webp"
-        resize(src, size, mode).save(path, "WEBP", quality=quality, method=6)
-        print(path.name, path.stat().st_size // 1024, "KB", flush=True)
+    path = ROOT / "img" / f"{name}.webp"
+    resize(src, (4096, 2048), mode).save(path, "WEBP", quality=quality, method=6)
+    print(path.name, path.stat().st_size // 1024, "KB", flush=True)
 
 
 def build_images(dl):

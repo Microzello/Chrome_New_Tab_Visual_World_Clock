@@ -75,7 +75,7 @@ export function monthBlend(ms) {
   return { a: (a + 12) % 12, b: (a + 13) % 12, t: pos - a };
 }
 
-const dayUrl = (month, tier) => `img/day_${String(month + 1).padStart(2, "0")}_${tier}.webp`;
+const dayUrl = (month) => `img/day_${String(month + 1).padStart(2, "0")}.webp`;
 
 async function loadBitmap(url) {
   const res = await fetch(url);
@@ -175,7 +175,6 @@ function createGL(canvas) {
   }
 
   return {
-    maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE),
     setLights(bitmap) {
       textureWidth = bitmap.width;
       const texture = upload(1, bitmap, true);
@@ -219,7 +218,6 @@ function create2D(canvas) {
   let dayImage = null;
 
   return {
-    maxTexture: 4096,
     setLights(bitmap) {
       bitmap.close();
     },
@@ -296,15 +294,12 @@ export function createRenderer(canvas, onReady) {
   }
   if (!backend) backend = create2D(canvas);
 
-  const screenPx = Math.max(screen.width, screen.height) * (window.devicePixelRatio || 1);
-  const wantsHigh = screenPx > 2800 && backend.maxTexture >= 8192;
   let view = null;
   let sun = null;
   let ms = Date.now();
   let dpr = 1;
   let ready = false;
-  let tier = "4k";
-  let lightsTier = null;
+  let hasLights = false;
   let day = null;
   let loading = false;
 
@@ -313,13 +308,7 @@ export function createRenderer(canvas, onReady) {
   }
 
   function dayIsStale(target) {
-    return (
-      !day ||
-      day.tier !== tier ||
-      day.a !== target.a ||
-      day.b !== target.b ||
-      Math.abs(day.t - target.t) > MONTH_TOLERANCE
-    );
+    return !day || day.a !== target.a || day.b !== target.b || Math.abs(day.t - target.t) > MONTH_TOLERANCE;
   }
 
   async function refresh() {
@@ -328,30 +317,19 @@ export function createRenderer(canvas, onReady) {
     try {
       for (;;) {
         const target = monthBlend(ms);
-        const want = tier;
-        const needLights = lightsTier !== want;
-        const needDay = dayIsStale(target);
-        if (!needLights && !needDay) {
-          if (want === "4k" && wantsHigh) {
-            tier = "8k";
-            continue;
-          }
-          break;
-        }
+        if (hasLights && !dayIsStale(target)) break;
         const withB = target.t > MONTH_TOLERANCE;
         const [lights, a, b] = await Promise.all([
-          needLights ? loadBitmap(`img/lights_${want}.webp`) : null,
-          needDay ? loadBitmap(dayUrl(target.a, want)) : null,
-          needDay && withB ? loadBitmap(dayUrl(target.b, want)) : null,
+          hasLights ? null : loadBitmap("img/lights.webp"),
+          loadBitmap(dayUrl(target.a)),
+          withB ? loadBitmap(dayUrl(target.b)) : null,
         ]);
         if (lights) {
           backend.setLights(lights);
-          lightsTier = want;
+          hasLights = true;
         }
-        if (a) {
-          backend.setDay(a, b, target.t);
-          day = { ...target, t: withB ? target.t : 0, tier: want };
-        }
+        backend.setDay(a, b, target.t);
+        day = { ...target, t: withB ? target.t : 0 };
         if (!ready) {
           ready = true;
           onReady?.();
