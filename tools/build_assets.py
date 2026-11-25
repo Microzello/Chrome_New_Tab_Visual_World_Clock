@@ -2,6 +2,7 @@ import gzip
 import re
 import sys
 import unicodedata
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from PIL import Image
@@ -28,18 +29,21 @@ def resize(src, size, mode):
     return img.convert("L") if mode == "L" else img
 
 
-def build_images(dl):
+def build_image(job):
+    src, name, mode, quality = job
     out = ROOT / "img"
-    out.mkdir(exist_ok=True)
-    for name, src, mode, quality in (
-        ("day", dl / "day.jpg", "RGB", 84),
-        ("lights", dl / "night.jpg", "L", 88),
-    ):
-        for tag, size in (("4k", (4096, 2048)), ("8k", (8192, 4096))):
-            img = resize(src, size, mode)
-            path = out / f"{name}_{tag}.webp"
-            img.save(path, "WEBP", quality=quality, method=6)
-            print(path.name, path.stat().st_size // 1024, "KB")
+    for tag, size in (("4k", (4096, 2048)), ("8k", (8192, 4096))):
+        path = out / f"{name}_{tag}.webp"
+        resize(src, size, mode).save(path, "WEBP", quality=quality, method=6)
+        print(path.name, path.stat().st_size // 1024, "KB", flush=True)
+
+
+def build_images(dl):
+    (ROOT / "img").mkdir(exist_ok=True)
+    jobs = [(dl / "night.jpg", "lights", "L", 88)]
+    jobs += [(dl / f"day_{m:02d}.jpg", f"day_{m:02d}", "RGB", 84) for m in range(1, 13)]
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        list(pool.map(build_image, jobs))
 
 
 def build_cities(dl):
@@ -100,7 +104,7 @@ def build_cities(dl):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit("usage: python tools/build_assets.py <dir with day.jpg night.jpg cities1000.txt admin1CodesASCII.txt>")
+        sys.exit("usage: python tools/build_assets.py <dir with day_01.jpg..day_12.jpg, night.jpg, cities1000.txt, admin1CodesASCII.txt>")
     dl = Path(sys.argv[1])
     build_cities(dl)
     build_images(dl)

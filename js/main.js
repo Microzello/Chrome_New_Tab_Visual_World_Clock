@@ -83,7 +83,7 @@ function draw() {
   if (!view) return;
   const ms = displayTime();
   const sun = subsolarPoint(ms);
-  renderer.render(view, sun);
+  renderer.render(view, sun, ms);
   pins.update({ cities: state.cities, view, ms, sun, twelve: twelve() });
   dock.setTime(ms, twelve());
   editor.refresh();

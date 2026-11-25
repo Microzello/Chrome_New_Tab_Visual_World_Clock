@@ -57,6 +57,26 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
+const BLEND = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+out vec4 outColor;
+void main() { outColor = texelFetch(uSrc, ivec2(gl_FragCoord.xy), 0); }`;
+
+const MONTH_TOLERANCE = 0.03;
+
+export function monthBlend(ms) {
+  const d = new Date(ms);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth();
+  const start = Date.UTC(year, month, 1);
+  const pos = month + (ms - start) / (Date.UTC(year, month + 1, 1) - start) - 0.5;
+  const a = Math.floor(pos);
+  return { a: (a + 12) % 12, b: (a + 13) % 12, t: pos - a };
+}
+
+const dayUrl = (month, tier) => `img/day_${String(month + 1).padStart(2, "0")}_${tier}.webp`;
+
 async function loadBitmap(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
@@ -75,19 +95,26 @@ function createGL(canvas) {
   const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, preserveDrawingBuffer: false });
   if (!gl) return null;
 
-  const program = gl.createProgram();
-  gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX));
-  gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+  const link = (fragment) => {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, VERTEX));
+    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fragment));
+    gl.bindAttribLocation(p, 0, "aPos");
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  };
+  const program = link(FRAGMENT);
+  const blendProgram = link(BLEND);
+  gl.useProgram(blendProgram);
+  gl.uniform1i(gl.getUniformLocation(blendProgram, "uSrc"), 2);
   gl.useProgram(program);
 
   const buffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(program, "aPos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
   const u = {};
   for (const name of ["uDay", "uNight", "uSize", "uScale", "uCenterY", "uCenterLon", "uYTop", "uYBottom", "uGlowLod", "uSun"]) {
@@ -97,15 +124,25 @@ function createGL(canvas) {
   gl.uniform1i(u.uNight, 1);
 
   const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
-  const textures = [gl.createTexture(), gl.createTexture()];
+  let dayTexture = null;
+  let lightsTexture = null;
   let textureWidth = 4096;
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
 
   function upload(unit, bitmap, single) {
+    const texture = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, textures[unit]);
-    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
     if (single) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, bitmap);
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return texture;
+  }
+
+  function finish(unit, texture) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -117,14 +154,46 @@ function createGL(canvas) {
     }
   }
 
+  function blendInto(target, bitmap, t) {
+    const source = upload(2, bitmap, false);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+      gl.viewport(0, 0, bitmap.width, bitmap.height);
+      gl.useProgram(blendProgram);
+      gl.enable(gl.BLEND);
+      gl.blendColor(0, 0, 0, t);
+      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.BLEND);
+      gl.useProgram(program);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(source);
+  }
+
   return {
     maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE),
-    setImages(day, lights) {
-      textureWidth = lights.width;
-      upload(0, day, false);
-      upload(1, lights, true);
-      day.close();
-      lights.close();
+    setLights(bitmap) {
+      textureWidth = bitmap.width;
+      const texture = upload(1, bitmap, true);
+      bitmap.close();
+      finish(1, texture);
+      if (lightsTexture) gl.deleteTexture(lightsTexture);
+      lightsTexture = texture;
+    },
+    setDay(a, b, t) {
+      const texture = upload(0, a, false);
+      a.close();
+      if (b) {
+        blendInto(texture, b, t);
+        b.close();
+      }
+      finish(0, texture);
+      if (dayTexture) gl.deleteTexture(dayTexture);
+      dayTexture = texture;
     },
     draw(view, sun, dpr) {
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -151,8 +220,22 @@ function create2D(canvas) {
 
   return {
     maxTexture: 4096,
-    setImages(day) {
-      dayImage = day;
+    setLights(bitmap) {
+      bitmap.close();
+    },
+    setDay(a, b, t) {
+      const composed = document.createElement("canvas");
+      composed.width = a.width;
+      composed.height = a.height;
+      const c = composed.getContext("2d");
+      c.drawImage(a, 0, 0);
+      a.close();
+      if (b) {
+        c.globalAlpha = t;
+        c.drawImage(b, 0, 0);
+        b.close();
+      }
+      dayImage = composed;
     },
     draw(view, sun, dpr) {
       const w = canvas.width;
@@ -213,34 +296,74 @@ export function createRenderer(canvas, onReady) {
   }
   if (!backend) backend = create2D(canvas);
 
+  const screenPx = Math.max(screen.width, screen.height) * (window.devicePixelRatio || 1);
+  const wantsHigh = screenPx > 2800 && backend.maxTexture >= 8192;
   let view = null;
   let sun = null;
+  let ms = Date.now();
   let dpr = 1;
   let ready = false;
+  let tier = "4k";
+  let lightsTier = null;
+  let day = null;
+  let loading = false;
 
   function draw() {
     if (ready && view && sun) backend.draw(view, sun, dpr);
   }
 
-  async function loadTier(tag) {
-    const [day, lights] = await Promise.all([
-      loadBitmap(`img/day_${tag}.webp`),
-      loadBitmap(`img/lights_${tag}.webp`),
-    ]);
-    backend.setImages(day, lights);
-    if (!ready) {
-      ready = true;
-      onReady?.();
-    }
-    draw();
+  function dayIsStale(target) {
+    return (
+      !day ||
+      day.tier !== tier ||
+      day.a !== target.a ||
+      day.b !== target.b ||
+      Math.abs(day.t - target.t) > MONTH_TOLERANCE
+    );
   }
 
-  const screenPx = Math.max(screen.width, screen.height) * (window.devicePixelRatio || 1);
-  loadTier("4k")
-    .then(() => {
-      if (screenPx > 2800 && backend.maxTexture >= 8192) return loadTier("8k");
-    })
-    .catch((err) => console.error("Map imagery failed to load", err));
+  async function refresh() {
+    if (loading) return;
+    loading = true;
+    try {
+      for (;;) {
+        const target = monthBlend(ms);
+        const want = tier;
+        const needLights = lightsTier !== want;
+        const needDay = dayIsStale(target);
+        if (!needLights && !needDay) {
+          if (want === "4k" && wantsHigh) {
+            tier = "8k";
+            continue;
+          }
+          break;
+        }
+        const withB = target.t > MONTH_TOLERANCE;
+        const [lights, a, b] = await Promise.all([
+          needLights ? loadBitmap(`img/lights_${want}.webp`) : null,
+          needDay ? loadBitmap(dayUrl(target.a, want)) : null,
+          needDay && withB ? loadBitmap(dayUrl(target.b, want)) : null,
+        ]);
+        if (lights) {
+          backend.setLights(lights);
+          lightsTier = want;
+        }
+        if (a) {
+          backend.setDay(a, b, target.t);
+          day = { ...target, t: withB ? target.t : 0, tier: want };
+        }
+        if (!ready) {
+          ready = true;
+          onReady?.();
+        }
+        draw();
+      }
+    } catch (err) {
+      console.error("Map imagery failed to load", err);
+    } finally {
+      loading = false;
+    }
+  }
 
   return {
     resize(width, height, ratio) {
@@ -250,9 +373,11 @@ export function createRenderer(canvas, onReady) {
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
     },
-    render(nextView, nextSun) {
+    render(nextView, nextSun, nextMs) {
       view = nextView;
       sun = nextSun;
+      ms = nextMs;
+      refresh();
       draw();
     },
   };

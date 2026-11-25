@@ -23,11 +23,11 @@ python -m http.server 8765
 Rebuild the map textures and city index from the source downloads:
 
 ```sh
-python tools/build_assets.py <dir with day.jpg, night.jpg, cities1000.txt, admin1CodesASCII.txt>
+python tools/build_assets.py <dir with day_01.jpg..day_12.jpg, night.jpg, cities1000.txt, admin1CodesASCII.txt>
 ```
 
 ## Dependencies
 
 - Runtime: none. Uses WebGL2 (with a 2D canvas fallback), `Intl` for time zones and DST, and `chrome.storage.sync`.
 - Asset build: Python 3 with Pillow.
-- Data: NASA Earth Observatory Blue Marble (`world.topo.bathy.200408`) and Black Marble 2016 imagery; GeoNames `cities1000` and `admin1CodesASCII` (CC BY 4.0).
+- Data: NASA Earth Observatory Blue Marble Next Generation monthly imagery (`world.topo.bathy.2004MM.3x21600x10800.jpg`, saved as `day_MM.jpg`) and Black Marble 2016 (`night.jpg`); GeoNames `cities1000` and `admin1CodesASCII` (CC BY 4.0).
