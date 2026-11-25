@@ -2,8 +2,12 @@ import { formatClock, formatShift, localTimeZone, wallClock } from "./time.js";
 
 const NEAR = 18;
 const FAR = 260;
-const MAX_STEPS = 24;
-const WHEEL_STEP = 60;
+const MAX_MINUTES = 720;
+const SNAP_MINUTES = 6;
+const WHEEL_MINUTES_PER_PX = 0.15;
+const KEY_MINUTES = 15;
+
+const KEY_DIRECTION = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 };
 
 const smooth = (t) => t * t * (3 - 2 * t);
 
@@ -26,7 +30,7 @@ export function createDock({ onShift, onEdit }) {
 
   let pointer = null;
   let dragging = false;
-  let steps = 0;
+  let minutes = 0;
   let frame = 0;
   let wheelAccum = 0;
 
@@ -46,7 +50,7 @@ export function createDock({ onShift, onEdit }) {
       el.classList.toggle("is-hidden", o < 0.04);
       if (el === scrub) scrubOpacity = o;
     }
-    const readoutOpacity = Math.max(scrubOpacity, steps ? 0.92 : 0);
+    const readoutOpacity = Math.max(scrubOpacity, minutes ? 0.92 : 0);
     readout.style.opacity = readoutOpacity.toFixed(3);
     readout.classList.toggle("is-hidden", readoutOpacity < 0.04);
   }
@@ -56,21 +60,21 @@ export function createDock({ onShift, onEdit }) {
   }
 
   function paintFill() {
-    const pct = (v) => ((v + MAX_STEPS) / (2 * MAX_STEPS)) * 100;
-    fill.style.left = `${Math.min(pct(0), pct(steps))}%`;
-    fill.style.width = `${Math.abs(pct(steps) - pct(0))}%`;
-    dock.classList.toggle("is-shifted", steps !== 0);
-    readout.classList.toggle("is-shifted", steps !== 0);
+    const pct = (v) => ((v + MAX_MINUTES) / (2 * MAX_MINUTES)) * 100;
+    fill.style.left = `${Math.min(pct(0), pct(minutes))}%`;
+    fill.style.width = `${Math.abs(pct(minutes) - pct(0))}%`;
+    dock.classList.toggle("is-shifted", minutes !== 0);
+    readout.classList.toggle("is-shifted", minutes !== 0);
   }
 
-  function setSteps(next, notify = true) {
-    next = Math.max(-MAX_STEPS, Math.min(MAX_STEPS, Math.round(next)));
-    if (next === steps) return;
-    steps = next;
-    slider.value = String(steps);
+  function setMinutes(next) {
+    next = Math.max(-MAX_MINUTES, Math.min(MAX_MINUTES, Math.round(next)));
+    slider.value = String(next);
+    if (next === minutes) return;
+    minutes = next;
     paintFill();
     schedule();
-    if (notify) onShift(steps);
+    onShift(minutes);
   }
 
   document.addEventListener(
@@ -90,7 +94,16 @@ export function createDock({ onShift, onEdit }) {
   dock.addEventListener("focusin", schedule);
   dock.addEventListener("focusout", () => setTimeout(schedule));
 
-  slider.addEventListener("input", () => setSteps(+slider.value));
+  slider.addEventListener("input", () => {
+    const value = +slider.value;
+    setMinutes(Math.abs(value) <= SNAP_MINUTES ? 0 : value);
+  });
+  slider.addEventListener("keydown", (e) => {
+    const dir = KEY_DIRECTION[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    setMinutes(minutes + dir * (e.shiftKey ? 60 : KEY_MINUTES));
+  });
   slider.addEventListener("pointerdown", () => {
     dragging = true;
     schedule();
@@ -100,8 +113,8 @@ export function createDock({ onShift, onEdit }) {
     dragging = false;
     schedule();
   });
-  slider.addEventListener("dblclick", () => setSteps(0));
-  readout.addEventListener("click", () => setSteps(0));
+  slider.addEventListener("dblclick", () => setMinutes(0));
+  readout.addEventListener("click", () => setMinutes(0));
   edit.addEventListener("click", () => onEdit());
 
   dock.addEventListener(
@@ -109,11 +122,11 @@ export function createDock({ onShift, onEdit }) {
     (e) => {
       e.preventDefault();
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      wheelAccum += e.deltaMode === 1 ? delta * 40 : delta;
-      while (Math.abs(wheelAccum) >= WHEEL_STEP) {
-        const dir = Math.sign(wheelAccum);
-        wheelAccum -= dir * WHEEL_STEP;
-        setSteps(steps + dir);
+      wheelAccum += (e.deltaMode === 1 ? delta * 40 : delta) * WHEEL_MINUTES_PER_PX;
+      const whole = Math.trunc(wheelAccum);
+      if (whole) {
+        wheelAccum -= whole;
+        setMinutes(minutes + whole);
       }
     },
     { passive: false }
@@ -123,11 +136,11 @@ export function createDock({ onShift, onEdit }) {
   applyVisibility();
 
   return {
-    get steps() {
-      return steps;
+    get minutes() {
+      return minutes;
     },
     reset() {
-      setSteps(0);
+      setMinutes(0);
     },
     refresh() {
       schedule();
@@ -135,9 +148,9 @@ export function createDock({ onShift, onEdit }) {
     setTime(ms, twelve) {
       const wall = wallClock(localTimeZone, ms);
       const { time, period } = formatClock(wall.hour, wall.minute, twelve);
-      readoutShift.textContent = formatShift(steps);
+      readoutShift.textContent = formatShift(minutes);
       readoutTime.textContent = `${wall.weekday} ${time}${period ? ` ${period}` : ""}`;
-      readout.title = steps ? "Back to now" : "";
+      readout.title = minutes ? "Back to now" : "";
     },
   };
 }

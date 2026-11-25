@@ -8,7 +8,6 @@ import { createPlacesClient } from "./places-client.js";
 import { isValidTimeZone, localTimeZone, uses12Hour } from "./time.js";
 import { DEFAULT_SETTINGS, legacyCityNames, loadState, onExternalChange, saveState } from "./store.js";
 
-const STEP_MS = 30 * 60 * 1000;
 const MAX_DPR = 2;
 const DEFAULT_NAMES = ["London", "New York City", "Dubai", "Tokyo", "Sydney"];
 const FALLBACK_CITIES = [
@@ -48,7 +47,7 @@ function twelve() {
 }
 
 function displayTime() {
-  return Date.now() + dock.steps * STEP_MS;
+  return Date.now() + dock.minutes * 60000;
 }
 
 function normalize(place) {
@@ -152,7 +151,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !editor.isOpen && dock.steps) dock.reset();
+  if (e.key === "Escape" && !editor.isOpen && dock.minutes) dock.reset();
 });
 
 start();

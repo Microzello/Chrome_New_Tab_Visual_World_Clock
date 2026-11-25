@@ -86,11 +86,11 @@ export function cityClock(tz, ms, twelve) {
   };
 }
 
-export function formatShift(steps) {
-  if (!steps) return "Now";
-  const minutes = Math.abs(steps) * 30;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  const sign = steps < 0 ? "−" : "+";
+export function formatShift(minutes) {
+  if (!minutes) return "Now";
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  const sign = minutes < 0 ? "−" : "+";
   return `${sign}${h ? `${h}h` : ""}${h && m ? " " : ""}${m ? `${m}m` : ""}`;
 }
